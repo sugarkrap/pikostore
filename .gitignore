@@ -1,0 +1,5 @@
+# Build output. The binary is produced into userspace/stage-target by the
+# piko repo's tools/build-pikostore.sh, never committed here.
+pikostore
+tests/romstate-test
+*.o
