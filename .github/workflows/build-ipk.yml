@@ -81,6 +81,21 @@ jobs:
           key: thirdparty-src-v1-${{ hashFiles('tools/build-thirdparty-deps.sh') }}
           save-always: true
 
+      # tools/build-thirdparty-deps.sh's fetch() skips downloading a
+      # tarball that is already present in userspace/.thirdparty-cache and
+      # just re-verifies its sha256 -- so seeding it here bypasses upstream
+      # mirrors this workflow has seen return transient errors (see
+      # tools/thirdparty-cache/README.md in this repo for exactly which
+      # ones, and why). fontconfig and xkeyboard-config are NOT vendored
+      # yet, so those two still go over the network.
+      - name: Seed vendored third-party tarballs (works around flaky upstream mirrors)
+        run: |
+          mkdir -p userspace/.thirdparty-cache
+          cp -n userspace/src/pikostore/tools/thirdparty-cache/*.tar.gz \
+                userspace/src/pikostore/tools/thirdparty-cache/*.tar.bz2 \
+                userspace/.thirdparty-cache/
+          ls -la userspace/.thirdparty-cache/
+
       - name: Build third-party X11 dependencies (zlib/expat/libpng/freetype/fontconfig/xkeyboard-config/dejavu)
         run: ./tools/build-thirdparty-deps.sh
 
