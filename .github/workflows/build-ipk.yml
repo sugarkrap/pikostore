@@ -99,6 +99,29 @@ jobs:
       - name: Build third-party X11 dependencies (zlib/expat/libpng/freetype/fontconfig/xkeyboard-config/dejavu)
         run: ./tools/build-thirdparty-deps.sh
 
+      # build-x11-stack.sh's xorgproto-header staging only has a working
+      # auto-detection path for Arch (`pacman -Ql xorgproto`); on Debian/
+      # Ubuntu it assumes `pkg-config --cflags xproto` returns a real -I
+      # flag, but on this runner's pkg-config that Cflags is empty --
+      # `-I/usr/include` gets stripped as a default system path -- so with
+      # nothing already staged it fails outright ("pacman not available").
+      # Reproduced directly: `pkg-config --cflags xproto` prints nothing
+      # here. Not a piko bug worth patching from this repo (no push access,
+      # and it's piko's script) -- instead, satisfy its own "already
+      # staged" escape hatch ourselves the same way the pacman branch would:
+      # copy exactly the files x11proto-dev owns (dpkg -L, the apt
+      # equivalent of `pacman -Ql xorgproto`) into userspace/stage-target.
+      - name: Pre-stage xorgproto headers (see comment -- works around a Debian/Ubuntu gap in build-x11-stack.sh's own detection)
+        run: |
+          mkdir -p userspace/stage-target/usr/include
+          dpkg -L x11proto-dev | grep '^/usr/include/' | while read -r f; do
+            [ -f "$f" ] || continue
+            rel="${f#/usr/include/}"
+            mkdir -p "userspace/stage-target/usr/include/$(dirname "$rel")"
+            cp -n "$f" "userspace/stage-target/usr/include/$rel"
+          done
+          test -f userspace/stage-target/usr/include/X11/Xfuncproto.h
+
       # Builds the whole X.Org + Matchbox stack into userspace/stage-target,
       # and -- at its own end, see tools/build-x11-stack.sh's header --
       # also builds FLTK via tools/build-fltk.sh. Not cached across runs:
