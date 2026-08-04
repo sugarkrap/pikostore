@@ -1,0 +1,9 @@
+[submodule "packages/zmenunx"]
+	path = packages/zmenunx
+	url = https://github.com/sugarkrap/zmenunx
+[submodule "packages/otQuake"]
+	path = packages/otQuake
+	url = https://github.com/sugarkrap/otquake
+[submodule "packages/otCraft"]
+	path = packages/otCraft
+	url = https://github.com/sugarkrap/otcraft
