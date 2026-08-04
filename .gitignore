@@ -2,4 +2,10 @@
 # piko repo's tools/build-pikostore.sh, never committed here.
 pikostore
 tests/romstate-test
+tests/repostate-test
 *.o
+
+# tools/generate-basic-repo.sh's shim symlink to a sibling ../piko
+# checkout (see its own comments) -- machine-local, never tracked.
+packages/piko
+

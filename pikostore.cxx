@@ -60,6 +60,8 @@
 #include <FL/Fl_Text_Display.H>
 #include <FL/Fl_Text_Buffer.H>
 #include <FL/Fl_File_Chooser.H>
+#include <FL/Fl_Hold_Browser.H>
+#include <FL/Fl_Input.H>
 #include <FL/fl_draw.H>
 #include <FL/fl_ask.H>
 
@@ -77,6 +79,7 @@
 #include <vector>
 
 #include "romstate.h"
+#include "repostate.h"
 
 using romstate::Manifest;
 using romstate::HistoryRow;
@@ -87,14 +90,16 @@ using romstate::parse_progress;
 using romstate::progress_percent;
 using romstate::ProgressRecord;
 
-/* Paths. All of these are contracts with the piko repo, not local
+/* Paths. Most of these are contracts with the piko repo, not local
  * choices: piko-update writes the history and installs the manifest, and
- * tools/gen-rom-manifest.sh defines the manifest's format. */
+ * tools/gen-rom-manifest.sh defines the manifest's format. REPOS_PATH is
+ * the exception -- it belongs to pikostore alone (see repostate.h). */
 static const char *MANIFEST_PATH = "/etc/zaurus/manifest";
 static const char *HISTORY_PATH  = "/etc/zaurus/update-history";
 static const char *PIKO_UPDATE   = "/usr/sbin/piko-update";
 static const char *SOFTREBOOT    = "/usr/sbin/softreboot";
 static const char *SD_CARD_DIR   = "/mnt/card";
+static const char *REPOS_PATH    = "/etc/zaurus/pikostore-repos";
 
 /* The typo is deliberate and requested -- do not "fix" it. */
 static const char *NO_MANIFEST_MSG = "oups, no changelog found, sowy";
@@ -679,29 +684,185 @@ private:
 };
 
 /* ---------------------------------------------------------------------- *
- * Packages tab (stub)                                                     *
+ * Repo settings dialog (Packages tab -> Settings)                         *
  * ---------------------------------------------------------------------- */
 
-static Fl_Group *make_packages_tab(int X, int Y, int W, int H)
-{
-    Fl_Group *g = new Fl_Group(X, Y, W, H, "Packages");
-    g->begin();
+/* Manages REPOS_PATH: a list of package-repo manifest URLs, browsable,
+ * addable and deletable. Every change is written to disk immediately (see
+ * repostate::write_repos) -- there is no separate Save step, matching how
+ * the rest of this app's state (update history, the manifest) is never
+ * something the user "commits" explicitly. */
+class RepoSettingsDialog {
+public:
+    RepoSettingsDialog(const std::string &path)
+        : path_(path), closed_(false)
+    {
+        repos_ = repostate::read_repos(path_.c_str());
 
-    Fl_Box *title = new Fl_Box(X + 10, Y + 20, W - 20, 24,
-                               "Package management is not built yet");
-    title->labelfont(FL_HELVETICA_BOLD);
-    title->align(FL_ALIGN_CENTER | FL_ALIGN_INSIDE);
+        int W = 420, H = 320, m = 10;
+        win_ = new Fl_Double_Window(W, H, "Package Repositories");
+        win_->begin();
 
-    Fl_Box *body = new Fl_Box(X + 10, Y + 50, W - 20, 60,
-                              "This tab will browse, install and remove ipkg\n"
-                              "packages. For now, use the System Update tab to\n"
-                              "install a full ROM update.");
-    body->align(FL_ALIGN_CENTER | FL_ALIGN_INSIDE);
+        list_ = new Fl_Hold_Browser(m, m, W - 2 * m, 210);
+        /* These are plain URLs, not styled text -- an '@' in one (e.g. a
+         * userinfo component) must not be read as an @-format code. */
+        list_->format_char(0);
+        list_->callback(list_cb, this);
 
-    g->end();
-    g->resizable(body);
-    return g;
-}
+        int y = m + 210 + 10;
+        int del_w = 70, add_w = 60, gap = 6;
+        del_ = new Fl_Button(W - m - del_w, y, del_w, 26, "Delete");
+        del_->callback(delete_cb, this);
+        del_->deactivate();
+
+        add_ = new Fl_Button(W - m - del_w - gap - add_w, y, add_w, 26, "Add");
+        add_->callback(add_cb, this);
+        add_->deactivate();
+
+        input_ = new Fl_Input(m, y, W - 2 * m - del_w - gap - add_w - gap, 26);
+        input_->when(FL_WHEN_CHANGED);
+        input_->callback(input_cb, this);
+
+        y += 26 + 14;
+        close_ = new Fl_Button(W - m - 80, y, 80, 26, "Close");
+        close_->callback(close_cb, this);
+
+        win_->end();
+        win_->set_modal();
+        win_->callback(close_cb, this);
+
+        refresh_list();
+    }
+
+    ~RepoSettingsDialog()
+    {
+        if (win_) { Fl::delete_widget(win_); win_ = 0; }
+    }
+
+    void run()
+    {
+        win_->show();
+        while (!closed_)
+            Fl::wait();
+    }
+
+private:
+    void refresh_list()
+    {
+        list_->clear();
+        for (std::vector<std::string>::const_iterator it = repos_.begin();
+             it != repos_.end(); ++it)
+            list_->add(it->c_str());
+        del_->deactivate();
+    }
+
+    static void list_cb(Fl_Widget *, void *v) { ((RepoSettingsDialog *)v)->on_select(); }
+    void on_select()
+    {
+        if (list_->value() > 0)
+            del_->activate();
+        else
+            del_->deactivate();
+    }
+
+    static void input_cb(Fl_Widget *, void *v) { ((RepoSettingsDialog *)v)->on_input(); }
+    void on_input()
+    {
+        std::string s = romstate::trim(std::string(input_->value()));
+        if (s.empty())
+            add_->deactivate();
+        else
+            add_->activate();
+    }
+
+    static void add_cb(Fl_Widget *, void *v) { ((RepoSettingsDialog *)v)->do_add(); }
+    void do_add()
+    {
+        if (repostate::add_repo(repos_, input_->value())) {
+            repostate::write_repos(path_.c_str(), repos_);
+            input_->value("");
+            add_->deactivate();
+            refresh_list();
+        }
+    }
+
+    static void delete_cb(Fl_Widget *, void *v) { ((RepoSettingsDialog *)v)->do_delete(); }
+    void do_delete()
+    {
+        int idx = list_->value();          /* 1-based; 0 = no selection */
+        if (idx <= 0 || idx > (int)repos_.size())
+            return;
+        repos_.erase(repos_.begin() + (idx - 1));
+        repostate::write_repos(path_.c_str(), repos_);
+        refresh_list();
+    }
+
+    static void close_cb(Fl_Widget *, void *v)
+    {
+        RepoSettingsDialog *d = (RepoSettingsDialog *)v;
+        d->win_->hide();
+        d->closed_ = true;
+    }
+
+    std::string              path_;
+    std::vector<std::string> repos_;
+    bool                     closed_;
+
+    Fl_Double_Window *win_;
+    Fl_Hold_Browser  *list_;
+    Fl_Input         *input_;
+    Fl_Button        *add_;
+    Fl_Button        *del_;
+    Fl_Button        *close_;
+};
+
+/* ---------------------------------------------------------------------- *
+ * Packages tab                                                            *
+ * ---------------------------------------------------------------------- */
+
+class PackagesTab {
+public:
+    PackagesTab(int X, int Y, int W, int H)
+    {
+        group_ = new Fl_Group(X, Y, W, H, "Packages");
+        group_->begin();
+
+        int m = 10;
+        settings_ = new Fl_Button(X + W - m - 90, Y + m, 90, 24, "Settings...");
+        settings_->callback(settings_cb, this);
+
+        Fl_Box *title = new Fl_Box(X + 10, Y + 50, W - 20, 24,
+                                   "Package management is not built yet");
+        title->labelfont(FL_HELVETICA_BOLD);
+        title->align(FL_ALIGN_CENTER | FL_ALIGN_INSIDE);
+
+        Fl_Box *body = new Fl_Box(X + 10, Y + 80, W - 20, 60,
+                                  "This tab will browse, install and remove ipkg\n"
+                                  "packages. Use Settings (above) to manage which\n"
+                                  "repositories it looks in.");
+        body->align(FL_ALIGN_CENTER | FL_ALIGN_INSIDE);
+
+        group_->end();
+        group_->resizable(body);
+    }
+
+    Fl_Group *group() { return group_; }
+
+private:
+    static void settings_cb(Fl_Widget *, void *v)
+    {
+        ((PackagesTab *)v)->open_settings();
+    }
+
+    void open_settings()
+    {
+        RepoSettingsDialog dlg(REPOS_PATH);
+        dlg.run();
+    }
+
+    Fl_Group  *group_;
+    Fl_Button *settings_;
+};
 
 /* ---------------------------------------------------------------------- *
  * main                                                                    *
@@ -722,7 +883,7 @@ int main(int argc, char **argv)
     tabs.begin();
 
     /* Packages first, System Update last, as specified. */
-    make_packages_tab(0, 24, 640, 436);
+    PackagesTab pkgtab(0, 24, 640, 436);
     SystemUpdateTab sysupd(0, 24, 640, 436);
 
     tabs.end();
