@@ -67,6 +67,23 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq pkg-config python3 x11proto-dev
 
+      # piko's own submodule pin for userspace/src/libmatchbox
+      # (d9fe29f at the time of writing) predates the MBMENU_HEADING
+      # constant, which its OWN matchbox-panel pin already needs --
+      # confirmed directly: `git show <pin>:libmb/mbmenu.h` has no
+      # MBMENU_HEADING, and mb-applet-menu-launcher.c fails with
+      # "'MBMENU_HEADING' undeclared". A genuine cross-submodule version
+      # skew in piko itself, not something make-x11-stack.sh's build logic
+      # can route around -- and not something to patch in piko from here
+      # (no push access). Bump just this one submodule to its fork's
+      # current tip, same trick already used above for pikostore's own
+      # submodule slot.
+      - name: Bump libmatchbox submodule (piko's pin predates a constant matchbox-panel already needs)
+        run: |
+          cd userspace/src/libmatchbox
+          git fetch --depth 1 origin main
+          git checkout FETCH_HEAD
+
       # Cached, from tools/build-uclibc-toolchain.sh via piko's own
       # composite action -- see .github/actions/piko-uclibc-toolchain in
       # the piko repo for what this restores/builds and verifies.
