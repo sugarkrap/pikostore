@@ -122,6 +122,15 @@ jobs:
           done
           test -f userspace/stage-target/usr/include/X11/Xfuncproto.h
 
+      # mb-volume (built as part of the Matchbox suite by build-x11-stack.sh,
+      # see tools/build-x11-stack.sh) needs alsa-lib staged at
+      # userspace/stage-alsa -- tools/build-alsa.sh is a separate script for
+      # that, not otherwise invoked by anything this workflow already runs.
+      - name: Build ALSA (needed by mb-volume)
+        env:
+          TOOLCHAIN_BIN_DIR: ${{ steps.toolchain.outputs.toolchain_bin_dir }}
+        run: ./tools/build-alsa.sh
+
       # Builds the whole X.Org + Matchbox stack into userspace/stage-target,
       # and -- at its own end, see tools/build-x11-stack.sh's header --
       # also builds FLTK via tools/build-fltk.sh. Not cached across runs:
